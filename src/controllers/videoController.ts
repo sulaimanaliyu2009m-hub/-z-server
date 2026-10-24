@@ -86,7 +86,7 @@ export const processVideo = async (req: AuthRequest, res: Response) => {
       const s3Response = await s3.send(getCmd);
       const writeStream = fs.createWriteStream(inputPath);
       await new Promise((resolve, reject) => {
-        (s3Response.Body as Readable).pipe(writeStream).on('finish', () => resolve()).on('error', reject);
+        (s3Response.Body as Readable).pipe(writeStream).on('finish', () => resolve(undefined as any)).on('error', reject);
       });
 
       // 2. Validate duration <= 60 seconds using ffprobe

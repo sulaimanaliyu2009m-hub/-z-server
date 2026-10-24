@@ -24,8 +24,8 @@ export const recommendationClient = {
 
       if (res.ok) {
         const json = await res.json();
-        if (Array.isArray(json.results) && json.results.length > 0) {
-          return json.results.map((r: RankedItem) => r.id);
+        if (Array.isArray((json as any).results) && (json as any).results.length > 0) {
+          return (json as any).results.map((r: RankedItem) => r.id);
         }
       }
     } catch {
