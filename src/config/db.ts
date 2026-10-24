@@ -1,35 +1,28 @@
-import { Pool } from 'pg';
+import { Pool, neonConfig } from '@neondatabase/serverless';
+import ws from 'ws';
 import dotenv from 'dotenv';
 import path from 'path';
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 dotenv.config();
 
-const isProduction = process.env.NODE_ENV === 'production';
+// Route database traffic through Port 443 (HTTPS/WebSocket) to bypass ISP port 5432 block
+neonConfig.webSocketConstructor = ws;
 
-export const pool = new Pool(
-  process.env.DATABASE_URL
-    ? {
-        connectionString: process.env.DATABASE_URL,
-        ssl: isProduction ? { rejectUnauthorized: false } : false
-      }
-    : {
-        user: 'z_admin',
-        password: 'z_secure_password',
-        host: 'localhost',
-        port: 5432,
-        database: 'z_db'
-      }
-);
+const dbUrl = process.env.DATABASE_URL || '';
+
+export const pool = new Pool({
+  connectionString: dbUrl,
+});
 
 pool.query('SELECT NOW()', (err, res) => {
   if (err) {
-    console.error('❌ Database Connection Error:', err.message);
+    console.error('❌ Database Connection Error:', err.message || err);
   } else {
-    console.log('✅ Connected to PostgreSQL successfully at:', res.rows[0].now);
+    console.log('✅ Connected to Neon PostgreSQL over Port 443 successfully at:', res.rows[0].now);
   }
 });
 
 pool.on('error', (err) => {
-  console.error('❌ PostgreSQL Pool Error:', err.message);
+  console.error('❌ PostgreSQL Pool Error:', err);
 });
