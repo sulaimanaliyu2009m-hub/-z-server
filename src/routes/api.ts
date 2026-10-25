@@ -24,6 +24,7 @@ import { getLivePosts, createLivePost, toggleRepost } from '../controllers/liveC
 import { generateCaptions, summarizePost, aiChat, testAiHealth } from '../controllers/aiController';
 import { getForYouFeed, recordWatchTime } from '../controllers/recommendationController';
 import { reportContent, toggleBlockUser } from '../controllers/moderationController';
+import { getUserProfile, updateProfile, getFollowersList, getFollowingList } from '../controllers/userController';
 import { authenticate } from '../middleware/auth';
 import { authLimiter } from '../middleware/rateLimiter';
 
@@ -41,6 +42,12 @@ router.post('/posts', authenticate, createPost);
 router.post('/posts/:id/like', authenticate, toggleLike);
 router.post('/posts/:id/comment', authenticate, addComment);
 router.post('/users/:id/follow', authenticate, toggleFollow);
+
+// User Profiles & Follow Lists
+router.get('/users/profile/:usernameOrId', authenticate, getUserProfile);
+router.put('/users/profile', authenticate, updateProfile);
+router.get('/users/:userId/followers', authenticate, getFollowersList);
+router.get('/users/:userId/following', authenticate, getFollowingList);
 
 // Video Upload
 router.get('/videos/limits', authenticate, getVideoLimits);
@@ -85,7 +92,7 @@ router.get('/live/posts', authenticate, getLivePosts);
 router.post('/live/posts', authenticate, createLivePost);
 router.post('/live/repost/:id', authenticate, toggleRepost);
 
-// AI Routes
+// AI
 router.post('/ai/generate-caption', authenticate, generateCaptions);
 router.post('/ai/summarize', authenticate, summarizePost);
 router.post('/ai/chat', authenticate, aiChat);
