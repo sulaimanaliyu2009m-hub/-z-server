@@ -1,3 +1,5 @@
+import healthRoutes from "./routes/healthRoutes";
+import { validateStorageConfig } from "./config/storage";
 import http from 'http';
 import express from 'express';
 import cors from 'cors';
@@ -59,7 +61,9 @@ app.get('/health/storage', async (_req, res) => {
   }
 });
 
-app.use('/api', apiRoutes);
+app.get("/", (req, res) => res.json({ name: "Z Backend API", status: "active", version: "1.0.0", docs: "/health/deep" }));
+app.use("/health", healthRoutes);
+app.use("/api", apiRoutes);
 app.use(errorHandler);
 
 // Setup Socket.IO
@@ -99,6 +103,7 @@ io.on('connection', (socket: Socket) => {
 });
 
 server.listen(PORT, async () => {
+  validateStorageConfig();
   console.log(`🚀 Z Backend running on port ${PORT}`);
   initializeGemini().catch((e) => console.warn('Gemini init notice:', e.message));
 });
