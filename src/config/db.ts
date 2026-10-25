@@ -4,13 +4,13 @@ import dns from 'dns';
 import dotenv from 'dotenv';
 import path from 'path';
 
-// Force IPv4 first to prevent MTN cellular timeouts on Node 24
+// Force IPv4 first to avoid cellular DNS timeouts
 dns.setDefaultResultOrder('ipv4first');
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 dotenv.config();
 
-// Route through Port 443 WebSockets
+// Route database traffic through Port 443 WebSockets
 neonConfig.webSocketConstructor = ws;
 
 // Remove -pooler because Neon WebSocket proxy (/v2) requires the direct host
@@ -38,5 +38,18 @@ export async function queryWithRetry(text: string, params?: any[]): Promise<any>
       return await pool.query(text, params);
     }
     throw error;
+  }
+}
+
+// Aliases matching existing project controllers
+export const executeQueryWithRetry = queryWithRetry;
+
+export async function checkDatabaseHealth(): Promise<{ ok: boolean; latencyMs?: number }> {
+  const start = Date.now();
+  try {
+    await pool.query('SELECT 1');
+    return { ok: true, latencyMs: Date.now() - start };
+  } catch {
+    return { ok: false };
   }
 }
