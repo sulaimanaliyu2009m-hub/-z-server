@@ -1,11 +1,22 @@
 import { Router } from 'express';
-import { authenticateToken } from '../middleware/auth';
-import { getVideoConfig, requestVideoUploadUrl, publishVideoPost } from '../controllers/videoController';
+import { 
+  getVideoConfig, 
+  getVideoLimits, 
+  requestVideoUploadUrl, 
+  getUploadUrl, 
+  publishVideoPost, 
+  processVideo, 
+  getVideoStatus 
+} from '../controllers/videoController';
+import { authenticate } from '../middleware/auth';
 
 const router = Router();
 
-router.get('/config', getVideoConfig);
-router.post('/request-upload-url', authenticateToken, requestVideoUploadUrl);
-router.post('/publish', authenticateToken, publishVideoPost);
+router.get('/config', authenticate, getVideoConfig);
+router.get('/limits', authenticate, getVideoLimits);
+router.post('/upload-url', authenticate, requestVideoUploadUrl);
+router.post('/process', authenticate, processVideo);
+router.post('/publish', authenticate, publishVideoPost);
+router.get('/:id/status', authenticate, getVideoStatus);
 
 export default router;

@@ -2,18 +2,37 @@ import { Router } from 'express';
 import { register, login } from '../controllers/authController';
 import { createPost, getFeed } from '../controllers/postController';
 import { toggleLike, addComment, toggleFollow } from '../controllers/interactionController';
-import { getUploadUrl, processVideo, getVideoStatus } from '../controllers/videoController';
+import {
+  getUploadUrl,
+  processVideo,
+  getVideoStatus,
+  getVideoLimits,
+} from '../controllers/videoController';
 import { getActiveStories, createStory } from '../controllers/storyController';
-import { 
-  getConversations, createConversation, getMessages, 
-  getNotifications, markNotificationsRead, searchUsers 
+import {
+  getConversations,
+  createConversation,
+  getMessages,
+  getNotifications,
+  markNotificationsRead,
+  searchUsers,
 } from '../controllers/chatController';
-import { 
-  getGroups, createGroup, toggleJoinGroup, getGroupPosts, createGroupPost,
-  getGroupMembers, getGroupEvents, createGroupEvent, rsvpEvent 
+import {
+  getGroups,
+  createGroup,
+  toggleJoinGroup,
+  getGroupPosts,
+  createGroupPost,
+  getGroupMembers,
+  getGroupEvents,
+  createGroupEvent,
+  rsvpEvent,
 } from '../controllers/communityController';
-import { 
-  search, getTrendingHashtags, getSuggestedUsers, getPostsByHashtag 
+import {
+  search,
+  getTrendingHashtags,
+  getSuggestedUsers,
+  getPostsByHashtag,
 } from '../controllers/discoverController';
 import { getLivePosts, createLivePost, toggleRepost } from '../controllers/liveController';
 import { generateCaptions, summarizePost, aiChat } from '../controllers/aiController';
@@ -28,16 +47,17 @@ const router = Router();
 router.post('/auth/register', authLimiter, register);
 router.post('/auth/login', authLimiter, login);
 
-// Posts & Feed
+// Posts & Feeds
 router.get('/posts/feed', authenticate, getFeed);
 router.post('/posts', authenticate, createPost);
 
-// Social
+// Social Interactions
 router.post('/posts/:id/like', authenticate, toggleLike);
 router.post('/posts/:id/comment', authenticate, addComment);
 router.post('/users/:id/follow', authenticate, toggleFollow);
 
-// Video Upload
+// Video Upload Pipeline
+router.get('/videos/limits', authenticate, getVideoLimits);
 router.post('/videos/upload-url', authenticate, getUploadUrl);
 router.post('/videos/process', authenticate, processVideo);
 router.get('/videos/:id/status', authenticate, getVideoStatus);
@@ -51,7 +71,7 @@ router.get('/conversations', authenticate, getConversations);
 router.post('/conversations', authenticate, createConversation);
 router.get('/conversations/:id/messages', authenticate, getMessages);
 
-// Notifications & User Search
+// Notifications & Search
 router.get('/notifications', authenticate, getNotifications);
 router.post('/notifications/read-all', authenticate, markNotificationsRead);
 router.get('/users/search', authenticate, searchUsers);
@@ -78,16 +98,16 @@ router.get('/live/posts', authenticate, getLivePosts);
 router.post('/live/posts', authenticate, createLivePost);
 router.post('/live/repost/:id', authenticate, toggleRepost);
 
-// AI Endpoints
+// AI Features
 router.post('/ai/generate-caption', authenticate, generateCaptions);
 router.post('/ai/summarize', authenticate, summarizePost);
 router.post('/ai/chat', authenticate, aiChat);
 
-// Recommendation Engine & Watch Tracking
+// Recommendation System
 router.get('/recommend/for-you', authenticate, getForYouFeed);
 router.post('/videos/watch', authenticate, recordWatchTime);
 
-// Moderation, Reporting & Blocking
+// Moderation
 router.post('/moderation/report', authenticate, reportContent);
 router.post('/moderation/block', authenticate, toggleBlockUser);
 

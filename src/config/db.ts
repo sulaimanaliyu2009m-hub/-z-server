@@ -4,15 +4,14 @@ import dotenv from 'dotenv';
 import path from 'path';
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
-dotenv.config();
 
+// Enable WebSocket transport over Port 443 (bypasses ISP port 5432 blocking)
 neonConfig.webSocketConstructor = ws;
 
-let dbUrl = process.env.DATABASE_URL || '';
+const dbUrl = process.env.DATABASE_URL || '';
 
-// Normalize connection string to Neon pooled endpoint if not already specified
-if (dbUrl.includes('neon.tech') && !dbUrl.includes('-pooler')) {
-  dbUrl = dbUrl.replace(/@([^/]+)/, '@$1-pooler');
+if (!dbUrl) {
+  console.error('❌ DATABASE_URL is not set in z-server/.env');
 }
 
 export const pool = new Pool({
@@ -22,21 +21,36 @@ export const pool = new Pool({
   connectionTimeoutMillis: 10000,
 });
 
-export async function queryWithRetry(text: string, params?: any[]): Promise<any> {
+pool.on('error', (err) => {
+  console.error('❌ PostgreSQL Pool Idle Client Error:', err.message);
+});
+
+// Retries query once after a brief delay if Neon is waking from compute suspension
+export async function executeQueryWithRetry(text: string, params: any[] = []): Promise<any> {
   try {
     return await pool.query(text, params);
-  } catch (error: any) {
+  } catch (err: any) {
     const isColdStart =
-      error.message?.includes('Connection terminated') ||
-      error.message?.includes('timeout') ||
-      error.code === 'ECONNRESET' ||
-      error.code === 'ETIMEDOUT';
-
+      err.code === '57P01' ||
+      err.message?.includes('connection') ||
+      err.message?.includes('timeout') ||
+      err.message?.includes('terminating connection');
     if (isColdStart) {
-      console.warn('⚠️ Neon database waking up. Retrying query in 1500ms...');
-      await new Promise((res) => setTimeout(res, 1500));
+      console.warn('⚠️ Neon database is waking up. Retrying query in 1.5s...');
+      await new Promise((r) => setTimeout(r, 1500));
       return await pool.query(text, params);
     }
-    throw error;
+    throw err;
+  }
+}
+
+// Deep health diagnostic for /health/deep
+export async function checkDatabaseHealth(): Promise<{ ok: boolean; latencyMs: number; error?: string }> {
+  const start = Date.now();
+  try {
+    await executeQueryWithRetry('SELECT 1');
+    return { ok: true, latencyMs: Date.now() - start };
+  } catch (err: any) {
+    return { ok: false, latencyMs: Date.now() - start, error: err.message };
   }
 }
