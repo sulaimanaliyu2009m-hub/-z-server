@@ -1,9 +1,9 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import { pool } from '../config/db';
-import { redis } from '../config/redis';
+import { io } from '../index';
 
-// 1. Get user's conversation list with unread message counts
+// 1. Get user's conversation list
 export const getConversations = async (req: AuthRequest, res: Response) => {
   const userId = req.user?.id;
   try {
@@ -52,7 +52,6 @@ export const createConversation = async (req: AuthRequest, res: Response) => {
   const allMemberIds = Array.from(new Set([userId, ...recipientIds]));
 
   try {
-    // If 1-on-1, check if conversation already exists
     if (!isGroup && allMemberIds.length === 2) {
       const existing = await pool.query(`
         SELECT c.id FROM conversations c
@@ -66,14 +65,12 @@ export const createConversation = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    // Create new conversation
     const convRes = await pool.query(
       `INSERT INTO conversations (is_group, title) VALUES ($1, $2) RETURNING id`,
       [Boolean(isGroup), isGroup ? (title || 'Group Chat') : null]
     );
     const convId = convRes.rows[0].id;
 
-    // Add members
     for (const memberId of allMemberIds) {
       await pool.query(
         `INSERT INTO conversation_members (conversation_id, user_id) VALUES ($1, $2)`,
@@ -93,7 +90,6 @@ export const getMessages = async (req: AuthRequest, res: Response) => {
   const userId = req.user?.id;
 
   try {
-    // Mark as read
     await pool.query(
       `UPDATE conversation_members SET last_read_at = NOW() WHERE conversation_id = $1 AND user_id = $2`,
       [conversationId, userId]
@@ -117,7 +113,48 @@ export const getMessages = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// 4. Notifications Endpoints
+// 4. Send Message via HTTP API (Guaranteed delivery fallback)
+export const sendMessageHttp = async (req: AuthRequest, res: Response) => {
+  const { id: conversationId } = req.params;
+  const { text, imageUrl } = req.body;
+  const userId = req.user?.id;
+
+  if (!text && !imageUrl) {
+    return res.status(400).json({ error: 'Message cannot be empty' });
+  }
+
+  try {
+    const msgRes = await pool.query(
+      `INSERT INTO messages (conversation_id, sender_id, text, image_url)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, conversation_id AS "conversationId", sender_id AS "senderId", text, image_url AS "imageUrl", created_at AS "createdAt"`,
+      [conversationId, userId, text || '', imageUrl || null]
+    );
+
+    await pool.query('UPDATE conversations SET updated_at = NOW() WHERE id = $1', [conversationId]);
+
+    const userRes = await pool.query('SELECT username, display_name, avatar_url FROM users WHERE id = $1', [userId]);
+    const sender = userRes.rows[0];
+
+    const fullMessage = {
+      ...msgRes.rows[0],
+      senderUsername: sender.username,
+      senderDisplayName: sender.display_name,
+      senderAvatar: sender.avatar_url,
+    };
+
+    // Broadcast over WebSocket if connected
+    if (io) {
+      io.to(`conv:${conversationId}`).emit('new_message', fullMessage);
+    }
+
+    res.status(201).json(fullMessage);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// 5. Notifications
 export const getNotifications = async (req: AuthRequest, res: Response) => {
   const userId = req.user?.id;
   try {
@@ -148,7 +185,7 @@ export const markNotificationsRead = async (req: AuthRequest, res: Response) => 
   }
 };
 
-// 5. User Search (to start new DMs or Group Chats)
+// 6. User Search
 export const searchUsers = async (req: AuthRequest, res: Response) => {
   const { q } = req.query;
   const currentUserId = req.user?.id;
