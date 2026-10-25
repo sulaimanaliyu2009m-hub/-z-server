@@ -1,3 +1,4 @@
+import userRoutes from "./routes/userRoutes";
 import healthRoutes from "./routes/healthRoutes";
 import { validateStorageConfig } from "./config/storage";
 import http from 'http';

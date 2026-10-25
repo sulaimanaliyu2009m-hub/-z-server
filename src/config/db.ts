@@ -1,56 +1,42 @@
 import { Pool, neonConfig } from '@neondatabase/serverless';
 import ws from 'ws';
+import dns from 'dns';
 import dotenv from 'dotenv';
 import path from 'path';
 
-dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+// Force IPv4 first to prevent MTN cellular timeouts on Node 24
+dns.setDefaultResultOrder('ipv4first');
 
-// Enable WebSocket transport over Port 443 (bypasses ISP port 5432 blocking)
+dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+dotenv.config();
+
+// Route through Port 443 WebSockets
 neonConfig.webSocketConstructor = ws;
 
-const dbUrl = process.env.DATABASE_URL || '';
-
-if (!dbUrl) {
-  console.error('❌ DATABASE_URL is not set in z-server/.env');
-}
+// Remove -pooler because Neon WebSocket proxy (/v2) requires the direct host
+const rawUrl = process.env.DATABASE_URL || '';
+const dbUrl = rawUrl.replace('-pooler', '');
 
 export const pool = new Pool({
   connectionString: dbUrl,
-  max: 10,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000,
+  connectionTimeoutMillis: 15000,
 });
 
-pool.on('error', (err) => {
-  console.error('❌ PostgreSQL Pool Idle Client Error:', err.message);
-});
-
-// Retries query once after a brief delay if Neon is waking from compute suspension
-export async function executeQueryWithRetry(text: string, params: any[] = []): Promise<any> {
+export async function queryWithRetry(text: string, params?: any[]): Promise<any> {
   try {
     return await pool.query(text, params);
-  } catch (err: any) {
+  } catch (error: any) {
     const isColdStart =
-      err.code === '57P01' ||
-      err.message?.includes('connection') ||
-      err.message?.includes('timeout') ||
-      err.message?.includes('terminating connection');
+      error.message?.includes('Connection terminated') ||
+      error.message?.includes('timeout') ||
+      error.code === 'ECONNRESET' ||
+      error.code === 'ETIMEDOUT';
+
     if (isColdStart) {
-      console.warn('⚠️ Neon database is waking up. Retrying query in 1.5s...');
-      await new Promise((r) => setTimeout(r, 1500));
+      console.warn('⚠️ Neon database waking from sleep. Retrying query in 2s...');
+      await new Promise((res) => setTimeout(res, 2000));
       return await pool.query(text, params);
     }
-    throw err;
-  }
-}
-
-// Deep health diagnostic for /health/deep
-export async function checkDatabaseHealth(): Promise<{ ok: boolean; latencyMs: number; error?: string }> {
-  const start = Date.now();
-  try {
-    await executeQueryWithRetry('SELECT 1');
-    return { ok: true, latencyMs: Date.now() - start };
-  } catch (err: any) {
-    return { ok: false, latencyMs: Date.now() - start, error: err.message };
+    throw error;
   }
 }
