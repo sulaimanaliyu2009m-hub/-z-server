@@ -134,7 +134,7 @@ export async function getProfile(req: AuthRequest, res: Response) {
     });
   } catch (err: any) {
     console.error('❌ [getProfile Error]:', err);
-    return res.status(500).json({ error: 'Failed to load user profile.' });
+    return res.status(500).json({ error: err.message || JSON.stringify(err) });
   }
 }
 
@@ -214,7 +214,7 @@ export async function toggleFollow(req: AuthRequest, res: Response) {
     });
   } catch (err: any) {
     console.error('❌ [toggleFollow Error]:', err);
-    return res.status(500).json({ error: 'Could not process follow request.' });
+    return res.status(500).json({ error: err.message || JSON.stringify(err) });
   }
 }
 
@@ -271,7 +271,7 @@ export async function getFollowers(req: AuthRequest, res: Response) {
     return res.status(200).json({ followers: result.rows });
   } catch (err: any) {
     console.error('❌ [getFollowers Error]:', err);
-    return res.status(500).json({ error: 'Failed to fetch followers list.' });
+    return res.status(500).json({ error: err.message || JSON.stringify(err) });
   }
 }
 
@@ -317,7 +317,7 @@ export async function getFollowing(req: AuthRequest, res: Response) {
     return res.status(200).json({ following: result.rows });
   } catch (err: any) {
     console.error('❌ [getFollowing Error]:', err);
-    return res.status(500).json({ error: 'Failed to fetch following list.' });
+    return res.status(500).json({ error: err.message || JSON.stringify(err) });
   }
 }
 
@@ -395,6 +395,6 @@ export async function updateProfile(req: AuthRequest, res: Response) {
     });
   } catch (err: any) {
     console.error('❌ [updateProfile Error]:', err);
-    return res.status(500).json({ error: err.message || 'Could not update profile.' });
+    return res.status(500).json({ error: err.message || JSON.stringify(err) });
   }
 }
