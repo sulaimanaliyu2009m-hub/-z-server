@@ -16,7 +16,6 @@ export async function initializeGemini(): Promise<void> {
 
 export const USER_SAFE_AI_ERROR = 'The AI assistant is unavailable right now, please try again.';
 
-// Direct REST fetch to Google's API using the verified gemini-3.8-flash model
 export async function callGemini(contents: any, config: any = {}): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey || apiKey === 'your_gemini_api_key_here') {
@@ -53,10 +52,9 @@ export async function callGemini(contents: any, config: any = {}): Promise<strin
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`;
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
 
   try {
-    console.log('🤖 Sending direct REST request to Gemini 3.8 Flash...');
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -65,7 +63,9 @@ export async function callGemini(contents: any, config: any = {}): Promise<strin
     });
 
     clearTimeout(timeoutId);
-    const data = await response.json();
+    
+    // Cast to any to satisfy TypeScript compilation rules
+    const data = (await response.json()) as any;
 
     if (!response.ok) {
       console.error('❌ Gemini REST API Error:', JSON.stringify(data));
