@@ -1,7 +1,8 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
-import { callGemini, USER_SAFE_AI_ERROR } from '../services/geminiService';
+import { callGemini, USER_SAFE_AI_ERROR, getActiveModelName } from '../services/geminiService';
 
+// 1. Generate Captions & Hashtags
 export const generateCaptions = async (req: AuthRequest, res: Response) => {
   const { prompt, mediaType } = req.body;
   if (!prompt || !prompt.trim()) {
@@ -25,14 +26,14 @@ Return response strictly as JSON with this structure:
     const parsed = JSON.parse(text || '{}');
     res.json(parsed);
   } catch (err: any) {
-    console.error('❌ Server AI Caption Error (Internal):', err.message || err);
+    console.error('❌ Server AI Caption Error:', err.message || err);
     res.status(503).json({ error: USER_SAFE_AI_ERROR });
   }
 };
 
-// Export alias expected by aiRoutes.ts
 export const generateCaption = generateCaptions;
 
+// 2. Summarize Post / Thread
 export const summarizePost = async (req: AuthRequest, res: Response) => {
   const { content, comments } = req.body;
   if (!content || !content.trim()) {
@@ -57,11 +58,12 @@ Return strictly JSON with:
     const parsed = JSON.parse(text || '{}');
     res.json(parsed);
   } catch (err: any) {
-    console.error('❌ Server AI Summary Error (Internal):', err.message || err);
+    console.error('❌ Server AI Summary Error:', err.message || err);
     res.status(503).json({ error: USER_SAFE_AI_ERROR });
   }
 };
 
+// 3. Comment Safety Guard
 export const checkCommentSafety = async (text: string): Promise<{ isSafe: boolean; reason?: string }> => {
   try {
     const prompt = `Analyze this social media comment for severe toxicity, hate speech, or malicious spam: "${text}".
@@ -82,6 +84,7 @@ Return strictly JSON with:
   }
 };
 
+// 4. AI Assistant Chat ("Ask Z") with History Sanitization
 export const aiChat = async (req: AuthRequest, res: Response) => {
   const { messages } = req.body;
   if (!messages || !Array.isArray(messages)) {
@@ -89,20 +92,52 @@ export const aiChat = async (req: AuthRequest, res: Response) => {
   }
 
   try {
-    const conversationHistory = messages.map((m: any) => ({
+    // Format conversation history
+    const rawHistory = messages.map((m: any) => ({
       role: m.sender === 'user' ? 'user' : 'model',
-      parts: [{ text: m.text }],
+      parts: [{ text: String(m.text || '') }],
     }));
 
-    const reply = await callGemini(conversationHistory, {
+    // RULE: Gemini requires the first content to have role 'user'
+    // Remove any initial AI greeting from the history sent to Google
+    while (rawHistory.length > 0 && rawHistory[0].role === 'model') {
+      rawHistory.shift();
+    }
+
+    if (rawHistory.length === 0) {
+      return res.json({ reply: 'Hello! How can I help you today?' });
+    }
+
+    const reply = await callGemini(rawHistory, {
       systemInstruction:
         'You are the assistant for social network "Z". Help users brainstorm viral content, draft scripts, summarize topics, and answer questions concisely and politely.',
       temperature: 0.7,
     });
 
-    res.json({ reply: reply || 'No response generated.' });
+    res.json({ reply: reply || 'I am ready to help!' });
   } catch (err: any) {
-    console.error('❌ Server AI Chat Error (Internal):', err.message || err);
+    console.error('❌ Server AI Chat Error:', err.message || err);
+    if (err.message === 'GEMINI_API_KEY_MISSING') {
+      return res.status(503).json({ error: 'GEMINI_API_KEY is not configured in Render environment variables.' });
+    }
     res.status(503).json({ error: USER_SAFE_AI_ERROR });
+  }
+};
+
+// 5. Diagnostic Health Endpoint
+export const testAiHealth = async (_req: any, res: Response) => {
+  try {
+    const reply = await callGemini('Say "AI is online!" in 4 words.');
+    res.json({
+      status: 'ok',
+      activeModel: getActiveModelName(),
+      response: reply.trim(),
+    });
+  } catch (err: any) {
+    res.status(503).json({
+      status: 'error',
+      message: err.message,
+      activeModel: getActiveModelName(),
+    });
   }
 };

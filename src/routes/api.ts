@@ -2,7 +2,12 @@ import { Router } from 'express';
 import { register, login } from '../controllers/authController';
 import { createPost, getFeed } from '../controllers/postController';
 import { toggleLike, addComment, toggleFollow } from '../controllers/interactionController';
-import { getUploadUrl, processVideo, getVideoStatus, getVideoLimits } from '../controllers/videoController';
+import {
+  getUploadUrl,
+  processVideo,
+  getVideoStatus,
+  getVideoLimits,
+} from '../controllers/videoController';
 import { getActiveStories, createStory } from '../controllers/storyController';
 import { 
   getConversations, createConversation, getMessages, sendMessageHttp,
@@ -16,7 +21,7 @@ import {
   search, getTrendingHashtags, getSuggestedUsers, getPostsByHashtag 
 } from '../controllers/discoverController';
 import { getLivePosts, createLivePost, toggleRepost } from '../controllers/liveController';
-import { generateCaptions, summarizePost, aiChat } from '../controllers/aiController';
+import { generateCaptions, summarizePost, aiChat, testAiHealth } from '../controllers/aiController';
 import { getForYouFeed, recordWatchTime } from '../controllers/recommendationController';
 import { reportContent, toggleBlockUser } from '../controllers/moderationController';
 import { authenticate } from '../middleware/auth';
@@ -47,7 +52,7 @@ router.get('/videos/:id/status', authenticate, getVideoStatus);
 router.get('/stories', authenticate, getActiveStories);
 router.post('/stories', authenticate, createStory);
 
-// Chat & DMs (Includes HTTP message send)
+// Chat & DMs
 router.get('/conversations', authenticate, getConversations);
 router.post('/conversations', authenticate, createConversation);
 router.get('/conversations/:id/messages', authenticate, getMessages);
@@ -80,12 +85,13 @@ router.get('/live/posts', authenticate, getLivePosts);
 router.post('/live/posts', authenticate, createLivePost);
 router.post('/live/repost/:id', authenticate, toggleRepost);
 
-// AI
+// AI Routes
 router.post('/ai/generate-caption', authenticate, generateCaptions);
 router.post('/ai/summarize', authenticate, summarizePost);
 router.post('/ai/chat', authenticate, aiChat);
+router.get('/ai/test', testAiHealth);
 
-// Recommendation
+// Recommendation Engine
 router.get('/recommend/for-you', authenticate, getForYouFeed);
 router.post('/videos/watch', authenticate, recordWatchTime);
 
