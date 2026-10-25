@@ -30,7 +30,16 @@ app.use(cors({
 app.use(express.json());
 
 // 1. Instant response endpoint
-app.use('/health', healthRoutes);
+app.get("/", (req, res) => {
+  res.status(200).json({
+    name: "Z Backend API",
+    status: "active",
+    version: "1.0.0",
+    docs: "/health/deep"
+  });
+});
+
+app.use("/health", healthRoutes);
 
 // 2. Application API endpoints
 app.use('/api/auth', authRoutes);
