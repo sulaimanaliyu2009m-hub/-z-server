@@ -1,163 +1,78 @@
 import { Response } from 'express';
-import { PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
-import { Readable } from 'stream';
 import { AuthRequest } from '../middleware/auth';
-import { pool } from '../config/db';
-import { s3, BUCKET_NAME, CDN_BASE_URL } from '../config/s3';
+import { createUploadPresignedUrl } from '../config/storage';
+import { queryWithRetry } from '../config/db';
+import crypto from 'crypto';
 
-const execAsync = promisify(exec);
+export function getVideoConstraints() {
+  const maxSeconds = parseInt(process.env.MAX_VIDEO_SECONDS || '300', 10);
+  const maxMb = parseInt(process.env.MAX_VIDEO_MB || '100', 10);
+  return { maxSeconds, maxMb };
+}
 
-// 1. Generate Presigned Upload URL
-export const getUploadUrl = async (req: AuthRequest, res: Response) => {
-  const userId = req.user?.id;
-  const { contentType, fileSize } = req.body;
+export function getVideoConfig(req: AuthRequest, res: Response) {
+  res.status(200).json(getVideoConstraints());
+}
 
-  // Enforce 100 MB Limit
-  const MAX_BYTES = 100 * 1024 * 1024;
-  if (fileSize && fileSize > MAX_BYTES) {
-    return res.status(400).json({ error: 'Video file size exceeds 100 MB limit.' });
+export async function requestVideoUploadUrl(req: AuthRequest, res: Response) {
+  const { contentType, sizeBytes, durationSeconds } = req.body;
+  const { maxSeconds, maxMb } = getVideoConstraints();
+  const maxBytes = maxMb * 1024 * 1024;
+
+  if (!contentType || !contentType.startsWith('video/')) {
+    return res.status(400).json({ error: 'Please select a valid video format.' });
   }
 
-  const rawKey = `raw/${userId}/${Date.now()}-upload.mp4`;
+  if (sizeBytes && sizeBytes > maxBytes) {
+    return res.status(400).json({ error: `The video exceeds the maximum size limit of ${maxMb} MB.` });
+  }
+
+  if (durationSeconds !== undefined) {
+    if (durationSeconds < 1) {
+      return res.status(400).json({ error: 'Video duration must be at least 1 second.' });
+    }
+    if (durationSeconds > maxSeconds) {
+      return res.status(400).json({ error: `The video exceeds the maximum duration of ${Math.floor(maxSeconds / 60)} minutes.` });
+    }
+  }
 
   try {
-    const dbRes = await pool.query(
-      `INSERT INTO videos (user_id, raw_s3_key, file_size_bytes, status)
-       VALUES ($1, $2, $3, 'uploading')
-       RETURNING id`,
-      [userId, rawKey, fileSize || null]
-    );
+    const ext = contentType.split('/')[1] || 'mp4';
+    const uniqueKey = `videos/${req.user?.id || 'anonymous'}/${Date.now()}-${crypto.randomBytes(6).toString('hex')}.${ext}`;
 
-    const videoId = dbRes.rows[0].id;
+    const uploadUrl = await createUploadPresignedUrl(uniqueKey, contentType, sizeBytes);
+    const cdnBase = (process.env.CDN_URL || '').replace(/\/$/, '');
+    const publicUrl = `${cdnBase}/${uniqueKey}`;
 
-    const command = new PutObjectCommand({
-      Bucket: BUCKET_NAME,
-      Key: rawKey,
-      ContentType: contentType || 'video/mp4'
-    });
-
-    const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 900 });
-
-    res.json({ videoId, uploadUrl, s3Key: rawKey });
+    return res.status(200).json({ uploadUrl, publicUrl, key: uniqueKey });
   } catch (err: any) {
-    console.error('Upload URL generation error:', err);
-    res.status(500).json({ error: 'Failed to generate signed upload URL' });
+    console.error('❌ [Video Presign Error]:', err);
+    return res.status(500).json({ error: 'Unable to prepare cloud storage for video upload. Please try again.' });
   }
-};
+}
 
-// 2. Transcode Video and Extract Thumbnail via FFmpeg
-export const processVideo = async (req: AuthRequest, res: Response) => {
-  const { videoId } = req.body;
+export async function publishVideoPost(req: AuthRequest, res: Response) {
+  const { content, mediaUrl, durationSeconds, thumbnailUrl } = req.body;
   const userId = req.user?.id;
 
-  const dbRes = await pool.query(
-    'SELECT * FROM videos WHERE id = $1 AND user_id = $2',
-    [videoId, userId]
-  );
-
-  if (dbRes.rows.length === 0) {
-    return res.status(404).json({ error: 'Video record not found' });
+  if (!mediaUrl) {
+    return res.status(400).json({ error: 'Media URL is required to publish a video.' });
   }
 
-  const video = dbRes.rows[0];
+  try {
+    const postResult = await queryWithRetry(
+      `INSERT INTO posts (user_id, post_type, content, media_url, thumbnail_url)
+       VALUES ($1, 'video', $2, $3, $4)
+       RETURNING *`,
+      [userId, content || '', mediaUrl, thumbnailUrl || null]
+    );
 
-  // Set status to processing
-  await pool.query("UPDATE videos SET status = 'processing', updated_at = NOW() WHERE id = $1", [videoId]);
-
-  // Respond immediately so frontend can poll
-  res.json({ message: 'Video processing started', videoId, status: 'processing' });
-
-  // Background FFmpeg Execution
-  (async () => {
-    const tmpDir = os.tmpdir();
-    const inputPath = path.join(tmpDir, `in-${videoId}.mp4`);
-    const outputPath = path.join(tmpDir, `out-${videoId}.mp4`);
-    const thumbPath = path.join(tmpDir, `thumb-${videoId}.jpg`);
-
-    try {
-      // 1. Download raw video from S3
-      const getCmd = new GetObjectCommand({ Bucket: BUCKET_NAME, Key: video.raw_s3_key });
-      const s3Response = await s3.send(getCmd);
-      const writeStream = fs.createWriteStream(inputPath);
-      await new Promise((resolve, reject) => {
-        (s3Response.Body as Readable).pipe(writeStream).on('finish', () => resolve(undefined as any)).on('error', reject);
-      });
-
-      // 2. Validate duration <= 60 seconds using ffprobe
-      const { stdout: durationOut } = await execAsync(
-        `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${inputPath}"`
-      );
-      const duration = parseFloat(durationOut.trim()) || 0;
-
-      if (duration > 60.5) {
-        throw new Error(`Video exceeds maximum allowed duration of 60s (received ${duration.toFixed(1)}s)`);
-      }
-
-      // 3. Transcode to web-friendly MP4 with faststart (H.264 / AAC, 720p max)
-      const transcodeCmd = `ffmpeg -y -i "${inputPath}" -c:v libx264 -preset veryfast -crf 23 -c:a aac -b:a 128k -movflags +faststart -vf "scale='min(720,iw)':-2" "${outputPath}"`;
-      await execAsync(transcodeCmd);
-
-      // 4. Extract 1-second Thumbnail
-      const thumbCmd = `ffmpeg -y -ss 00:00:01 -i "${inputPath}" -vframes 1 -q:v 2 "${thumbPath}"`;
-      await execAsync(thumbCmd);
-
-      // 5. Upload transcoded video and thumbnail to S3
-      const transKey = `processed/${userId}/${videoId}.mp4`;
-      const thumbKey = `thumbnails/${userId}/${videoId}.jpg`;
-
-      await s3.send(new PutObjectCommand({
-        Bucket: BUCKET_NAME,
-        Key: transKey,
-        Body: fs.createReadStream(outputPath),
-        ContentType: 'video/mp4'
-      }));
-
-      await s3.send(new PutObjectCommand({
-        Bucket: BUCKET_NAME,
-        Key: thumbKey,
-        Body: fs.createReadStream(thumbPath),
-        ContentType: 'image/jpeg'
-      }));
-
-      const videoUrl = `${CDN_BASE_URL}/${transKey}`;
-      const thumbnailUrl = `${CDN_BASE_URL}/${thumbKey}`;
-
-      // 6. Update database to ready
-      await pool.query(
-        `UPDATE videos 
-         SET status = 'ready', transcoded_s3_key = $1, thumbnail_s3_key = $2,
-             video_url = $3, thumbnail_url = $4, duration = $5, updated_at = NOW()
-         WHERE id = $6`,
-        [transKey, thumbKey, videoUrl, thumbnailUrl, duration, videoId]
-      );
-
-      console.log(`✅ Video ${videoId} successfully transcoded and ready on CDN: ${videoUrl}`);
-    } catch (processErr: any) {
-      console.error(`❌ Transcoding error for video ${videoId}:`, processErr.message);
-      await pool.query(
-        "UPDATE videos SET status = 'failed', error_message = $1, updated_at = NOW() WHERE id = $2",
-        [processErr.message, videoId]
-      );
-    } finally {
-      // Cleanup local temp files
-      if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
-      if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
-      if (fs.existsSync(thumbPath)) fs.unlinkSync(thumbPath);
-    }
-  })();
-};
-
-// 3. Poll Processing Status
-export const getVideoStatus = async (req: AuthRequest, res: Response) => {
-  const { id } = req.params;
-  const dbRes = await pool.query('SELECT status, video_url, thumbnail_url, error_message FROM videos WHERE id = $1', [id]);
-
-  if (dbRes.rows.length === 0) return res.status(404).json({ error: 'Video not found' });
-  res.json(dbRes.rows[0]);
-};
+    return res.status(201).json({
+      message: 'Video posted successfully',
+      post: postResult.rows[0],
+    });
+  } catch (err: any) {
+    console.error('❌ [Publish Video Error]:', err);
+    return res.status(500).json({ error: 'Could not publish video post. Please try again.' });
+  }
+}

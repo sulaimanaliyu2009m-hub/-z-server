@@ -1,68 +1,88 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { pool } from '../config/db';
+import { queryWithRetry } from '../config/db';
 
-export const register = async (req: Request, res: Response) => {
-  const { email, password, username, displayName } = req.body;
-  if (!email || !password || !username) {
-    return res.status(400).json({ error: 'Missing required credentials' });
+export async function login(req: Request, res: Response) {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Please enter both your email and password.' });
   }
 
   try {
-    const existing = await pool.query('SELECT id FROM users WHERE email = $1 OR username = $2', [email, username]);
-    if (existing.rows.length > 0) {
-      return res.status(409).json({ error: 'Email or username already in use' });
+    const result = await queryWithRetry(
+      'SELECT id, email, username, display_name, password_hash, avatar_url FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1',
+      [email]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({ error: 'Incorrect email or password. Please try again.' });
     }
 
-    const hash = await bcrypt.hash(password, 10);
-    const result = await pool.query(
-      `INSERT INTO users (email, username, display_name, password_hash)
-       VALUES ($1, $2, $3, $4)
-       RETURNING id, email, username, display_name AS "displayName", avatar_url AS "avatarUrl", bio, created_at AS "createdAt"`,
-      [email.toLowerCase(), username.toLowerCase(), displayName || username, hash]
+    const user = result.rows[0];
+    const passwordMatch = await bcrypt.compare(password, user.password_hash);
+    if (!passwordMatch) {
+      return res.status(401).json({ error: 'Incorrect email or password. Please try again.' });
+    }
+
+    const token = jwt.sign(
+      { id: user.id, email: user.email, username: user.username },
+      process.env.JWT_SECRET || 'z_production_jwt_secret_2026_super_safe',
+      { expiresIn: '7d' }
     );
 
-    const user = result.rows[0];
-    const token = jwt.sign({ id: user.id, username: user.username }, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' });
-
-    res.status(201).json({ user: { ...user, followersCount: 0, followingCount: 0, followingIds: [] }, token });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-};
-
-export const login = async (req: Request, res: Response) => {
-  const { email, password } = req.body;
-  try {
-    const result = await pool.query(
-      `SELECT id, email, username, display_name AS "displayName", password_hash, avatar_url AS "avatarUrl", bio, created_at AS "createdAt" 
-       FROM users WHERE email = $1`, 
-      [email.toLowerCase()]
-    );
-    if (result.rows.length === 0) return res.status(401).json({ error: 'Invalid email or password' });
-
-    const user = result.rows[0];
-    const valid = await bcrypt.compare(password, user.password_hash);
-    if (!valid) return res.status(401).json({ error: 'Invalid email or password' });
-
-    delete user.password_hash;
-    const token = jwt.sign({ id: user.id, username: user.username }, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' });
-
-    // Fetch followings
-    const followings = await pool.query('SELECT following_id FROM follows WHERE follower_id = $1', [user.id]);
-    const followingIds = followings.rows.map(r => r.following_id);
-
-    res.json({
+    return res.status(200).json({
+      message: 'Login successful',
+      token,
       user: {
-        ...user,
-        followersCount: 0,
-        followingCount: followingIds.length,
-        followingIds
+        id: user.id,
+        email: user.email,
+        username: user.username,
+        displayName: user.display_name,
+        avatarUrl: user.avatar_url,
       },
-      token
     });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    console.error('❌ [Login Error]:', err);
+    return res.status(503).json({ error: 'The authentication server is temporarily unavailable. Please try again.' });
   }
-};
+}
+
+export async function register(req: Request, res: Response) {
+  const { email, username, displayName, password } = req.body;
+
+  if (!email || !username || !password) {
+    return res.status(400).json({ error: 'Email, username, and password are required.' });
+  }
+
+  try {
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    const result = await queryWithRetry(
+      `INSERT INTO users (email, username, display_name, password_hash)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, email, username, display_name, avatar_url`,
+      [email, username, displayName || username, passwordHash]
+    );
+
+    const newUser = result.rows[0];
+    const token = jwt.sign(
+      { id: newUser.id, email: newUser.email, username: newUser.username },
+      process.env.JWT_SECRET || 'z_production_jwt_secret_2026_super_safe',
+      { expiresIn: '7d' }
+    );
+
+    return res.status(201).json({
+      message: 'Account created successfully',
+      token,
+      user: newUser,
+    });
+  } catch (err: any) {
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'An account with that email or username already exists.' });
+    }
+    console.error('❌ [Register Error]:', err);
+    return res.status(503).json({ error: 'The registration server is temporarily unavailable. Please try again.' });
+  }
+}

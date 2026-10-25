@@ -1,0 +1,25 @@
+[
+  {
+    "AllowedOrigins": [
+      "https://z-app-lemon.vercel.app",
+      "https://*.vercel.app",
+      "http://localhost:5173",
+      "http://localhost:3000"
+    ],
+    "AllowedMethods": [
+      "GET",
+      "PUT",
+      "HEAD",
+      "POST"
+    ],
+    "AllowedHeaders": [
+      "*"
+    ],
+    "ExposeHeaders": [
+      "ETag",
+      "Content-Type",
+      "Content-Length"
+    ],
+    "MaxAgeSeconds": 3600
+  }
+]
