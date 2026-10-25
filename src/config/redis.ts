@@ -14,3 +14,5 @@ redis.on('connect', () => {
 redis.on('error', (err) => {
   console.warn('⚠️ Redis Error (Caching disabled):', err.message);
 });
+export const redisClient = redis;
+export default redis;

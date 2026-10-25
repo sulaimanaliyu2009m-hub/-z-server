@@ -19,3 +19,6 @@ export const authenticate = (req: AuthRequest, res: Response, next: NextFunction
     res.status(403).json({ error: 'Invalid or expired token' });
   }
 };
+export const authenticateToken = authenticate;
+export const authMiddleware = authenticate;
+export default authenticate;
