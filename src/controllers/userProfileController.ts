@@ -12,6 +12,13 @@ export async function getProfile(req: AuthRequest, res: Response) {
   const viewerId = req.user?.id || null;
 
   try {
+    await queryWithRetry(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS cover_url TEXT DEFAULT '';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS location VARCHAR(100) DEFAULT '';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS website VARCHAR(255) DEFAULT '';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT false;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS is_private BOOLEAN DEFAULT false;
+    `);
     // 1. Fetch user profile + follow metrics + viewer state
     const userQuery = `
       SELECT 
@@ -337,7 +344,7 @@ export async function checkUsername(req: AuthRequest, res: Response) {
  * PUT /api/users/profile
  */
 export async function updateProfile(req: AuthRequest, res: Response) {
-  const userId = req.user?.id;
+  const userId = req.user?.id || (req as any).userId;
   const { displayName, username, bio, location, website, avatarUrl, coverUrl, isPrivate } = req.body;
 
   if (!userId) return res.status(401).json({ error: 'Authentication required' });
@@ -346,7 +353,7 @@ export async function updateProfile(req: AuthRequest, res: Response) {
     // Check username uniqueness if changed
     if (username) {
       const usernameExists = await queryWithRetry(
-        'SELECT id FROM users WHERE LOWER(username) = LOWER($1) AND id != $2',
+        'SELECT id FROM users WHERE LOWER(username) = LOWER($1) AND id != $2::uuid',
         [username.trim(), userId]
       );
       if (usernameExists.rows.length > 0) {
@@ -366,7 +373,7 @@ export async function updateProfile(req: AuthRequest, res: Response) {
         cover_url = COALESCE($7, cover_url),
         is_private = COALESCE($8, is_private),
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $9
+      WHERE id = $9::uuid
       RETURNING id, username, display_name, avatar_url, cover_url, bio, location, website, is_verified, is_private;
     `;
 
@@ -388,6 +395,6 @@ export async function updateProfile(req: AuthRequest, res: Response) {
     });
   } catch (err: any) {
     console.error('❌ [updateProfile Error]:', err);
-    return res.status(500).json({ error: 'Could not update profile.' });
+    return res.status(500).json({ error: err.message || 'Could not update profile.' });
   }
 }
