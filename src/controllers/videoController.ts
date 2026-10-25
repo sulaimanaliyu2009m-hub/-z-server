@@ -24,12 +24,15 @@ export const getVideoLimits = (_req: AuthRequest, res: Response) => {
   });
 };
 
-// Aliases for route files
 export const getVideoConfig = getVideoLimits;
 
 export const getUploadUrl = async (req: AuthRequest, res: Response) => {
   const userId = req.user?.id;
   const { contentType, fileSize } = req.body;
+
+  if (!userId) {
+    return res.status(401).json({ error: 'Please log in to upload videos.' });
+  }
 
   if (!isStorageConfigured) {
     console.error('❌ S3/R2 storage is not configured in environment.');
@@ -44,6 +47,13 @@ export const getUploadUrl = async (req: AuthRequest, res: Response) => {
   const rawKey = `raw/${userId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.mp4`;
 
   try {
+    // 1. Check if user actually exists in Neon to prevent foreign key errors from stale sessions
+    const userCheck = await pool.query('SELECT id FROM users WHERE id = $1', [userId]);
+    if (userCheck.rows.length === 0) {
+      return res.status(401).json({ error: 'Your session is from an older database. Please log out and log in again.' });
+    }
+
+    // 2. Insert tracking record in videos table
     const dbRes = await pool.query(
       `INSERT INTO videos (user_id, raw_s3_key, file_size_bytes, status)
        VALUES ($1, $2, $3, 'uploading')
@@ -53,6 +63,7 @@ export const getUploadUrl = async (req: AuthRequest, res: Response) => {
 
     const videoId = dbRes.rows[0].id;
 
+    // 3. Generate presigned URL
     const command = new PutObjectCommand({
       Bucket: BUCKET_NAME,
       Key: rawKey,
@@ -64,11 +75,10 @@ export const getUploadUrl = async (req: AuthRequest, res: Response) => {
     res.json({ videoId, uploadUrl, s3Key: rawKey });
   } catch (err: any) {
     console.error('❌ Failed to generate signed upload URL:', err.message || err);
-    res.status(500).json({ error: 'Failed to generate signed upload URL. Please try again.' });
+    res.status(500).json({ error: `Upload error: ${err.message || 'Database error'}` });
   }
 };
 
-// Alias for route files
 export const requestVideoUploadUrl = getUploadUrl;
 
 export const processVideo = async (req: AuthRequest, res: Response) => {
@@ -100,7 +110,6 @@ export const processVideo = async (req: AuthRequest, res: Response) => {
       const s3Response = await s3.send(getCmd);
       const writeStream = fs.createWriteStream(inputPath);
 
-      // Clean finish callback without extra arguments
       await new Promise<void>((resolve, reject) => {
         (s3Response.Body as Readable)
           .pipe(writeStream)
@@ -167,7 +176,6 @@ export const processVideo = async (req: AuthRequest, res: Response) => {
   })();
 };
 
-// Alias for publishing video post
 export const publishVideoPost = async (req: AuthRequest, res: Response) => {
   const { content, mediaUrl, thumbnailUrl } = req.body;
   const userId = req.user?.id;
