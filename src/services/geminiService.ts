@@ -5,7 +5,6 @@ import path from 'path';
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
 let aiClient: GoogleGenAI | null = null;
-// Use gemini-3.8-flash as the primary modern model
 let activeModelName = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
 
 export async function initializeGemini(): Promise<void> {
@@ -16,33 +15,12 @@ export async function initializeGemini(): Promise<void> {
   }
 
   aiClient = new GoogleGenAI({ apiKey });
-
-  try {
-    const configured = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
-    const modelsList = await aiClient.models.list();
-    const availableNames: string[] = [];
-
-    for await (const m of modelsList) {
-      if (m.name) {
-        availableNames.push(m.name.replace(/^models\//, ''));
-      }
-    }
-
-    if (availableNames.includes(configured)) {
-      activeModelName = configured;
-      console.log(`🤖 Gemini AI active model: ${activeModelName}`);
-    } else {
-      const fallback = availableNames.find((name) => name.includes('flash')) || 'gemini-3.8-flash';
-      activeModelName = fallback;
-      console.log(`🤖 Gemini AI model set to: ${activeModelName}`);
-    }
-  } catch (err: any) {
-    console.warn(`⚠️ Model list notice: ${err.message}. Using: ${activeModelName}`);
-  }
+  console.log(`🤖 Gemini AI initialized with model: ${activeModelName}`);
 }
 
 export const USER_SAFE_AI_ERROR = 'The AI assistant is unavailable right now, please try again.';
 
+// Wrapper with 60-second timeout and detailed error logging
 export async function callGemini(contents: any, config: any = {}): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey || apiKey === 'your_gemini_api_key_here') {
@@ -55,18 +33,26 @@ export async function callGemini(contents: any, config: any = {}): Promise<strin
 
   const modelToUse = process.env.GEMINI_MODEL || activeModelName || 'gemini-3.8-flash';
 
+  console.log(`🤖 Sending request to Gemini (${modelToUse})...`);
+
   const timeoutPromise = new Promise<never>((_, reject) => {
-    setTimeout(() => reject(new Error('AI_REQUEST_TIMEOUT')), 30000);
+    setTimeout(() => reject(new Error('AI_REQUEST_TIMEOUT_60S')), 60000);
   });
 
-  const apiPromise = aiClient.models.generateContent({
-    model: modelToUse,
-    contents,
-    config,
-  });
+  try {
+    const apiPromise = aiClient.models.generateContent({
+      model: modelToUse,
+      contents,
+      config,
+    });
 
-  const result: any = await Promise.race([apiPromise, timeoutPromise]);
-  return result?.text || '';
+    const result: any = await Promise.race([apiPromise, timeoutPromise]);
+    console.log('✅ Gemini responded successfully.');
+    return result?.text || '';
+  } catch (err: any) {
+    console.error('❌ Gemini API Error Details:', err.message || err);
+    throw err;
+  }
 }
 
 export function getActiveModelName(): string {
