@@ -1,3 +1,26 @@
+
+async function ensureProfileSchema() {
+  try {
+    const { queryWithRetry } = await import("./config/db");
+    await queryWithRetry(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS cover_url TEXT DEFAULT '';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS location VARCHAR(100) DEFAULT '';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS website VARCHAR(255) DEFAULT '';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT false;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS is_private BOOLEAN DEFAULT false;
+      ALTER TABLE follows ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'accepted';
+      CREATE TABLE IF NOT EXISTS blocks (
+        blocker_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        blocked_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (blocker_id, blocked_id)
+      );
+    `);
+    console.log("✅ Profile and Follow database schema verified.");
+  } catch (err) {
+    console.warn("⚠️ Schema note:", err.message);
+  }
+}
 import userRoutes from "./routes/userRoutes";
 import healthRoutes from "./routes/healthRoutes";
 import { validateStorageConfig } from "./config/storage";
