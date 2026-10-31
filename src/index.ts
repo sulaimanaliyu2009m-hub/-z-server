@@ -85,7 +85,7 @@ app.get('/health/storage', async (_req, res) => {
   }
 });
 
-app.get("/", (req, res) => res.json({ name: "Z Backend API", status: "active", version: "1.0.0", docs: "/health/deep" }));
+app.get("/", (req, res) => res.json({ name: "Zumeko Backend API", status: "active", version: "1.0.0", docs: "/health/deep" }));
 app.use("/health", healthRoutes);
 app.use("/api", apiRoutes);
 app.use(errorHandler);
