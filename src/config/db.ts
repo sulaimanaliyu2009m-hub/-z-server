@@ -1,25 +1,23 @@
 import { Pool, neonConfig } from '@neondatabase/serverless';
 import ws from 'ws';
-import dns from 'dns';
 import dotenv from 'dotenv';
 import path from 'path';
-
-// Force IPv4 first to avoid cellular DNS timeouts
-dns.setDefaultResultOrder('ipv4first');
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 dotenv.config();
 
-// Route database traffic through Port 443 WebSockets
 neonConfig.webSocketConstructor = ws;
 
-// Remove -pooler because Neon WebSocket proxy (/v2) requires the direct host
-const rawUrl = process.env.DATABASE_URL || '';
-const dbUrl = rawUrl.replace('-pooler', '');
+let dbUrl = process.env.DATABASE_URL || '';
+if (dbUrl.includes('neon.tech') && !dbUrl.includes('-pooler')) {
+  dbUrl = dbUrl.replace(/@([^/]+)/, '@$1-pooler');
+}
 
 export const pool = new Pool({
   connectionString: dbUrl,
-  connectionTimeoutMillis: 15000,
+  max: 10,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000,
 });
 
 export async function queryWithRetry(text: string, params?: any[]): Promise<any> {
@@ -33,23 +31,12 @@ export async function queryWithRetry(text: string, params?: any[]): Promise<any>
       error.code === 'ETIMEDOUT';
 
     if (isColdStart) {
-      console.warn('⚠️ Neon database waking from sleep. Retrying query in 2s...');
-      await new Promise((res) => setTimeout(res, 2000));
+      console.warn('⚠️ Neon database waking from sleep. Retrying query in 1500ms...');
+      await new Promise((res) => setTimeout(res, 1500));
       return await pool.query(text, params);
     }
     throw error;
   }
 }
 
-// Aliases matching existing project controllers
 export const executeQueryWithRetry = queryWithRetry;
-
-export async function checkDatabaseHealth(): Promise<{ ok: boolean; latencyMs?: number }> {
-  const start = Date.now();
-  try {
-    await pool.query('SELECT 1');
-    return { ok: true, latencyMs: Date.now() - start };
-  } catch {
-    return { ok: false };
-  }
-}

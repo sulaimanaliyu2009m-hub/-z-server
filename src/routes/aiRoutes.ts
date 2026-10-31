@@ -1,12 +1,7 @@
 import { Router } from 'express';
-import { generateCaptions, generateCaption, summarizePost, aiChat } from '../controllers/aiController';
-import { authenticate } from '../middleware/auth';
-
+import { authenticateToken } from '../middleware/auth';
+import { aiRateLimiter } from '../middleware/aiRateLimit';
+import { generateCaption } from '../controllers/aiController';
 const router = Router();
-
-router.post('/generate-caption', authenticate, generateCaptions);
-router.post('/caption', authenticate, generateCaption);
-router.post('/summarize', authenticate, summarizePost);
-router.post('/chat', authenticate, aiChat);
-
+router.post('/generate-caption', authenticateToken, aiRateLimiter, generateCaption);
 export default router;
